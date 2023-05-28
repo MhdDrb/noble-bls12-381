@@ -175,6 +175,10 @@ function stringToBytes(str: string) {
 function os2ip(bytes: Uint8Array): bigint {
   let result = 0n;
   for (let i = 0; i < bytes.length; i++) {
+    if(i == 1) {
+      console.log(bytes[i].toString(16))
+    }
+
     result <<= 8n;
     result += BigInt(bytes[i]);
   }
@@ -210,18 +214,31 @@ async function expand_message_xmd(
   lenInBytes: number,
   H: Hash = utils.sha256
 ): Promise<Uint8Array> {
+
+  console.log("DST.length")
+  console.log(DST.length)
   // https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-hash-to-curve-16#section-5.3.3
   if (DST.length > 255) DST = await H(concatBytes(stringToBytes('H2C-OVERSIZE-DST-'), DST));
+  console.log(uint8ArrayToHexString(stringToBytes('H2C-OVERSIZE-DST-')))
   const b_in_bytes = H.outputLen;
+  console.log("b_in_bytes")
+  console.log(b_in_bytes)
+
   const r_in_bytes = b_in_bytes * 2;
   const ell = Math.ceil(lenInBytes / b_in_bytes);
+  console.log("ell", ell)
   if (ell > 255) throw new Error('Invalid xmd length');
   const DST_prime = concatBytes(DST, i2osp(DST.length, 1));
   const Z_pad = i2osp(0, r_in_bytes);
   const l_i_b_str = i2osp(lenInBytes, 2);
+  console.log("l_i_b_str")
+  console.log(uint8ArrayToHexString(l_i_b_str))
   const b = new Array<Uint8Array>(ell);
   const b_0 = await H(concatBytes(Z_pad, msg, l_i_b_str, i2osp(0, 1), DST_prime));
+  console.log("b_0", uint8ArrayToHexString(b_0))
   b[0] = await H(concatBytes(b_0, i2osp(1, 1), DST_prime));
+  console.log("b[0]", uint8ArrayToHexString(b[0]))
+
   for (let i = 1; i <= ell; i++) {
     const args = [strxor(b_0, b[i - 1]), i2osp(i + 1, 1), DST_prime];
     b[i] = await H(concatBytes(...args));
@@ -246,24 +263,60 @@ async function hash_to_field(
   // value in hftDefaults (ie hash to G2).
   const htfOptions = { ...htfDefaults, ...options };
   const log2p = htfOptions.p.toString(2).length;
+  console.log("log2p")
+  console.log(log2p)
+
+  console.log("htfOptions.p")
+  console.log(htfOptions.p)
+
+  console.log("htfOptions")
+  console.log(htfOptions)
+
   const L = Math.ceil((log2p + htfOptions.k) / 8); // section 5.1 of ietf draft link above
+  console.log("L")
+  console.log(L)
+
   const len_in_bytes = count * htfOptions.m * L;
+  console.log("len_in_bytes")
+  console.log(len_in_bytes)
+
   const DST = stringToBytes(htfOptions.DST);
+  console.log("DST")
+  console.log(uint8ArrayToHexString(DST))
+
   let pseudo_random_bytes = msg;
   if (htfOptions.expand) {
     pseudo_random_bytes = await expand_message_xmd(msg, DST, len_in_bytes, htfOptions.hash);
   }
   const u = new Array(count);
+  console.log("count")
+  console.log(count)
   for (let i = 0; i < count; i++) {
     const e = new Array(htfOptions.m);
     for (let j = 0; j < htfOptions.m; j++) {
       const elm_offset = L * (j + i * htfOptions.m);
       const tv = pseudo_random_bytes.subarray(elm_offset, elm_offset + L);
+      console.log("0000000000000")
+      console.log(i * htfOptions.m + j )
+      console.log(uint8ArrayToHexString(tv))
+      console.log(os2ip(tv))
+      console.log(mod(os2ip(tv), htfOptions.p))
+      console.log("0000000000000")
       e[j] = mod(os2ip(tv), htfOptions.p);
     }
     u[i] = e;
   }
   return u;
+}
+
+function uint8ArrayToHexString(uint8Array: Uint8Array): string {
+  let hexString = '';
+  for (let i = 0; i < uint8Array.length; i++) {
+    let hex = uint8Array[i].toString(16);
+    hex = (hex.length === 1) ? '0' + hex : hex;
+    hexString += hex;
+  }
+  return hexString;
 }
 
 function normalizePrivKey(key: PrivateKey): bigint {
@@ -367,8 +420,14 @@ export class PointG1 extends ProjectivePoint<Fp> {
         const [x, y] = this.toAffine();
         const flag = (y.value * 2n) / P;
         hex = x.value + flag * POW_2_381 + POW_2_383;
+
+        // console.log(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+        // console.log(hex.toString(16))
+        // console.log(toPaddedHex(hex, PUBLIC_KEY_LENGTH))
+        // console.log(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
       }
-      return toPaddedHex(hex, PUBLIC_KEY_LENGTH);
+      // return toPaddedHex(hex, PUBLIC_KEY_LENGTH);
+      return hex.toString(16);
     } else {
       if (this.isZero()) {
         // 2x PUBLIC_KEY_LENGTH
@@ -392,8 +451,11 @@ export class PointG1 extends ProjectivePoint<Fp> {
   }
 
   // Sparse multiplication against precomputed coefficients
-  millerLoop(P: PointG2): Fp12 {
-    return millerLoop(P.pairingPrecomputes(), this.toAffine());
+  millerLoop(G: PointG2): Fp12 {
+    let thePreComps = G.pairingPrecomputes()
+    // console.log("thePreComps[1]")
+    // console.log(thePreComps[1])
+    return millerLoop(thePreComps, this.toAffine());
   }
 
   // Clear cofactor of G1
@@ -481,11 +543,31 @@ export class PointG2 extends ProjectivePoint<Fp2> {
   static async hashToCurve(msg: Hex, options?: Partial<typeof htfDefaults>): Promise<PointG2> {
     msg = ensureBytes(msg);
     const u = await hash_to_field(msg, 2, options);
+    
+    console.log("uuuuuuuuuuuuuuuuu")
+    console.log(u[0][0].toString(16).padStart(128, "0"))
+    console.log(u[0][1].toString(16).padStart(128, "0"))
+    console.log(u[1][0].toString(16).padStart(128, "0"))
+    console.log(u[1][1].toString(16).padStart(128, "0"))
+    console.log("uuuuuuuuuuuuuuuuu")
     //console.log(`hash_to_curve(msg}) u0=${new Fp2(u[0])} u1=${new Fp2(u[1])}`);
     const [x0, y0] = map_to_curve_simple_swu_9mod16(Fp2.fromBigTuple(u[0]));
     const [x1, y1] = map_to_curve_simple_swu_9mod16(Fp2.fromBigTuple(u[1]));
     const [x2, y2] = new PointG2(x0, y0).add(new PointG2(x1, y1)).toAffine();
+
     const [x3, y3] = isogenyMapG2(x2, y2);
+
+    // console.log("=======================")
+
+    // const myPoint = new PointG2(x3, y3).clearCofactor()
+    // const myPointAffine = myPoint.toAffine()
+    // console.log("theX:", myPointAffine[0])
+    // console.log("theY:", myPointAffine[1])
+    // console.log("=======================")
+
+    // const myPoint = new PointG2(x3, y3)
+    // myPoint.assertValidity();
+
     return new PointG2(x3, y3).clearCofactor();
   }
   static async encodeToCurve(msg: Hex, options?: Partial<typeof htfDefaults>): Promise<PointG2> {
@@ -493,6 +575,7 @@ export class PointG2 extends ProjectivePoint<Fp2> {
     const u = await hash_to_field(msg, 1, options);
     const [x0, y0] = map_to_curve_simple_swu_9mod16(Fp2.fromBigTuple(u[0]));
     const [x1, y1] = isogenyMapG2(x0, y0);
+
     return new PointG2(x1, y1).clearCofactor();
   }
 
@@ -658,6 +741,12 @@ export class PointG2 extends ProjectivePoint<Fp2> {
   // prettier-ignore
   clearCofactor(): PointG2 {
     const P = this;
+
+    // console.log("clearCofactor...")
+    // console.log("Qx: ", P.x)
+    // console.log("Qy: ", P.y)
+    // console.log("Qz: ", P.z)
+
     let t1 = P.mulCurveX();   // [-x]P
     let t2 = P.psi();         // Ψ(P)
     let t3 = P.double();      // 2P
@@ -668,6 +757,12 @@ export class PointG2 extends ProjectivePoint<Fp2> {
     t3 = t3.add(t2);          // Ψ²(2P) - Ψ(P) + [x²]P - [x]Ψ(P)
     t3 = t3.subtract(t1);     // Ψ²(2P) - Ψ(P) + [x²]P - [x]Ψ(P) + [x]P
     const Q = t3.subtract(P); // Ψ²(2P) - Ψ(P) + [x²]P - [x]Ψ(P) + [x]P - 1P =>
+    // console.log("---------")
+
+    // console.log("Qx: ", Q.x)
+    // console.log("Qy: ", Q.y)
+    // console.log("Qz: ", Q.z)
+    // console.log("...clearCofactor")
     return Q;                 // [x²-x-1]P + [x-1]Ψ(P) + Ψ²(2P)
   }
 
@@ -718,7 +813,9 @@ export function pairing(P: PointG1, Q: PointG2, withFinalExponent: boolean = tru
   Q.assertValidity();
   // Performance: 9ms for millerLoop and ~14ms for exp.
   const looped = P.millerLoop(Q);
-  return withFinalExponent ? looped.finalExponentiate() : looped;
+  console.log("pairing returning looped")
+  return looped;
+  // return withFinalExponent ? looped.finalExponentiate() : looped;
 }
 
 type G1Hex = Hex | PointG1;
@@ -751,18 +848,119 @@ export async function sign(message: G2Hex, privateKey: PrivateKey): Promise<Uint
   return sigPoint.toSignature();
 }
 
+function hexStringToUint8Array(hexString: string): Uint8Array {
+  // remove the 0x prefix if present
+  if (hexString.slice(0, 2) === '0x') {
+    hexString = hexString.slice(2);
+  }
+
+  // convert the hex string to a byte array
+  const byteLength = hexString.length / 2;
+  const byteArray = new Uint8Array(byteLength);
+  for (let i = 0; i < byteLength; i++) {
+    const hexByte = hexString.slice(i * 2, (i + 1) * 2);
+    const byte = parseInt(hexByte, 16);
+    byteArray[i] = byte;
+  }
+
+  return byteArray;
+}
+
+
 // Checks if pairing of public key & hash is equal to pairing of generator & signature.
 // e(P, H(m)) == e(G, S)
 export async function verify(signature: G2Hex, message: G2Hex, publicKey: G1Hex): Promise<boolean> {
+  console.log("verify...")
+  // console.log("publicKey: ", publicKey)
   const P = normP1(publicKey);
+  console.log("Px: ", P.x)
+  console.log("Py: ", P.y)
+  console.log("Pz: ", P.z)
+
+  console.log("P.toHex(): ", P.toHex(true))
+
+  // let newPubKeyStr = "0xb513ddbb5e07f7ecf1674ed24481ebe3b04ace5cdf50cd47d764e8b1a19bb30c32a4d451999c4e4042d7c46c38a94a19"
+  // let newPubKey = hexStringToUint8Array(newPubKeyStr)
+  // let NPK = normP1(newPubKey)
+  // console.log(newPubKeyStr)
+  // console.log("NPKx: ", NPK.x.value.toString(16))
+  // console.log("NPKy: ", NPK.y.value.toString(16))
+  // console.log("NPKz: ", NPK.z.value.toString(16))
+
+  // newPubKeyStr = "0x8e93c654d233cd7be65e280fe48fc7608018985dd51a412f2ee343b8fe54b986febf66917a0038c161666c9d59eca68e"
+  // newPubKey = hexStringToUint8Array(newPubKeyStr)
+  // NPK = normP1(newPubKey)
+  // console.log(newPubKeyStr)
+  // console.log("NPKx: ", NPK.x.value.toString(16))
+  // console.log("NPKy: ", NPK.y.value.toString(16))
+  // console.log("NPKz: ", NPK.z.value.toString(16))
+
+
+  // newPubKeyStr = "0x9398dc9b367b4a8feab9c4d0ee0590ba0e0838c7cf7e681a498360baf0f935ee9ec63cf7b21d61c6cf3dcf76f603e2df"
+  // newPubKey = hexStringToUint8Array(newPubKeyStr)
+  // NPK = normP1(newPubKey)
+  // console.log(newPubKeyStr)
+  // console.log("NPKx: ", NPK.x.value.toString(16))
+  // console.log("NPKy: ", NPK.y.value.toString(16))
+  // console.log("NPKz: ", NPK.z.value.toString(16))
+
+  // newPubKeyStr = "0x91f4e4a953dc7cc2cedf79fb78cc76950c4936d18e0ed504273c651fb35245d5b88a881031e8b74fc9bacb3393417aba"
+  // newPubKey = hexStringToUint8Array(newPubKeyStr)
+  // NPK = normP1(newPubKey)
+  // console.log(newPubKeyStr)
+  // console.log("NPKx: ", NPK.x.value.toString(16))
+  // console.log("NPKy: ", NPK.y.value.toString(16))
+  // console.log("NPKz: ", NPK.z.value.toString(16))
+
+  // const hashMyMessage = await normP2Hash("fe51b840da60f939e40ba79302a4d6f6bb638fb7f1714c81c1ab86b27b1ad3ba")
+  console.log("888888888888888888888888")
+  const hashMyMessage = await PointG2.hashToCurve(
+    "0c91054a3cc455f51727474c1ca2175d9274a63ce1d19e4c1a5e728d22eccbcf",
+    {
+      DST: 'BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_',
+    }
+  )
+  
+  const cHashMyMessage = hashMyMessage.toHex(true)
+
+  console.log("999999999999999999999999")
+  console.log("cHashMyMessage", cHashMyMessage)
+  
+
   const Hm = await normP2Hash(message);
+  console.log("Hm: ", Hm.toHex(true))
+  console.log("HmX a0: ", Hm.toAffine()[0].c0.value.toString(16))
+  console.log("HmX a1: ", Hm.toAffine()[0].c1.value.toString(16))
+  console.log("HmY a0: ", Hm.toAffine()[1].c0.value.toString(16))
+  console.log("HmY a1: ", Hm.toAffine()[1].c1.value.toString(16))
+  // console.log("HmZ: ", Hm.z)
+
   const G = PointG1.BASE;
+  // console.log("Gx: ", G.x)
+  // console.log("Gy: ", G.y)
+  // console.log("Gz: ", G.z)
+
   const S = normP2(signature);
+  // console.log("Sx: ", S.x)
+  // console.log("Sy: ", S.y)
+  // console.log("Sz: ", S.z)
+
+  // console.log("...verify")
+
   // Instead of doing 2 exponentiations, we use property of billinear maps
   // and do one exp after multiplying 2 points.
   const ePHm = pairing(P.negate(), Hm, false);
+
+  // console.log("ePHmc0: ", ePHm.c0)
+  // console.log("ePHmc1: ", ePHm.c1)
+
   const eGS = pairing(G, S, false);
+  
+  // console.log("eGSc0: ", eGS.c0)
+  // console.log("eGSc1: ", eGS.c1)
+
   const exp = eGS.multiply(ePHm).finalExponentiate();
+  console.log("...verify")
   return exp.equals(Fp12.ONE);
 }
 
