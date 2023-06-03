@@ -545,19 +545,53 @@ export class PointG2 extends ProjectivePoint<Fp2> {
     const u = await hash_to_field(msg, 2, options);
     
     console.log("uuuuuuuuuuuuuuuuu")
-    console.log(u[0][0].toString(16).padStart(128, "0"))
-    console.log(u[0][1].toString(16).padStart(128, "0"))
-    console.log(u[1][0].toString(16).padStart(128, "0"))
-    console.log(u[1][1].toString(16).padStart(128, "0"))
+    console.log(u[0][0].toString(16))
+    console.log(u[0][1].toString(16))
+    console.log(u[1][0].toString(16))
+    console.log(u[1][1].toString(16))
     console.log("uuuuuuuuuuuuuuuuu")
     //console.log(`hash_to_curve(msg}) u0=${new Fp2(u[0])} u1=${new Fp2(u[1])}`);
     const [x0, y0] = map_to_curve_simple_swu_9mod16(Fp2.fromBigTuple(u[0]));
+    
+    console.log("WWWWWWWWWWWWWWWWWWWWWWWW")
+    console.log(x0.c0.value.toString(16).padStart(128, "0"))
+    console.log(x0.c1.value.toString(16).padStart(128, "0"))
+    console.log(y0.c0.value.toString(16).padStart(128, "0"))
+    console.log(y0.c1.value.toString(16).padStart(128, "0"))
+    console.log("WWWWWWWWWWWWWWWWWWWWWWWW")
+
     const [x1, y1] = map_to_curve_simple_swu_9mod16(Fp2.fromBigTuple(u[1]));
     const [x2, y2] = new PointG2(x0, y0).add(new PointG2(x1, y1)).toAffine();
 
+    console.log("++++++++++++++++++++++++++++++++++")
+    // let khiar = new PointG2(x2, y2)
+    // console.log(khiar.toAffine())
+
+    console.log(
+      "[x0, y0]: ",
+      u[0],
+      new PointG2(x0, y0).toAffine()
+    )
+
+    console.log(
+      "[x1, y1]: ",
+      u[1],
+      new PointG2(x1, y1).toAffine()
+    )
+
+    console.log(
+      "[x2, y2]: ",
+      new PointG2(x2, y2).toAffine()
+    )
+
     const [x3, y3] = isogenyMapG2(x2, y2);
 
-    // console.log("=======================")
+    console.log(
+      "[x3, y3]: ",
+      new PointG2(x3, y3).toAffine()
+    )
+
+    console.log("=======================")
 
     // const myPoint = new PointG2(x3, y3).clearCofactor()
     // const myPointAffine = myPoint.toAffine()
@@ -568,8 +602,13 @@ export class PointG2 extends ProjectivePoint<Fp2> {
     // const myPoint = new PointG2(x3, y3)
     // myPoint.assertValidity();
 
+    console.log(
+      new PointG2(x3, y3).clearCofactor().toAffine()
+    )
+
     return new PointG2(x3, y3).clearCofactor();
   }
+
   static async encodeToCurve(msg: Hex, options?: Partial<typeof htfDefaults>): Promise<PointG2> {
     msg = ensureBytes(msg);
     const u = await hash_to_field(msg, 1, options);
@@ -806,6 +845,43 @@ export class PointG2 extends ProjectivePoint<Fp2> {
   }
 }
 
+export async function mapToCurve(msg: Hex, options?: Partial<typeof htfDefaults>): Promise<PointG2> {
+
+  msg = ensureBytes(msg);
+  const u = await hash_to_field(msg, 2, options);
+      
+  // x, y := swuMapG2(fp2, u)
+  const [x0, y0] = map_to_curve_simple_swu_9mod16(Fp2.fromBigTuple(u[0]));
+
+  // isogenyMapG2(fp2, x, y)
+  const [x1, y1] = isogenyMapG2(x0, y0);
+
+  // z := new(fe2).one()
+  // q := &PointG2{*x, *y, *z}
+  // g.ClearCofactor(q)
+  // return g.Affine(q), nil
+
+  let p1 = new PointG2(x1, y1).clearCofactor();
+
+
+
+  const [x2, y2] = map_to_curve_simple_swu_9mod16(Fp2.fromBigTuple(u[1]));
+
+  // isogenyMapG2(fp2, x, y)
+  const [x3, y3] = isogenyMapG2(x2, y2);
+
+  // z := new(fe2).one()
+  // q := &PointG2{*x, *y, *z}
+  // g.ClearCofactor(q)
+  // return g.Affine(q), nil
+
+  let p2 = new PointG2(x3, y3).clearCofactor();
+
+  const [x4, y4] = p1.add(p2).toAffine()
+
+  return new PointG2(x4, y4);
+}
+
 // Calculates bilinear pairing
 export function pairing(P: PointG1, Q: PointG2, withFinalExponent: boolean = true): Fp12 {
   if (P.isZero() || Q.isZero()) throw new Error('No pairings at point of Infinity');
@@ -923,8 +999,31 @@ export async function verify(signature: G2Hex, message: G2Hex, publicKey: G1Hex)
   
   const cHashMyMessage = hashMyMessage.toHex(true)
 
+  console.log("hashMyMessage x")
+  console.log(hashMyMessage.x)
+  console.log("hashMyMessage y")
+  console.log(hashMyMessage.y)
+
   console.log("999999999999999999999999")
   console.log("cHashMyMessage", cHashMyMessage)
+
+
+  const hashMyMessage2 = await mapToCurve(
+    "0c91054a3cc455f51727474c1ca2175d9274a63ce1d19e4c1a5e728d22eccbcf",
+    {
+      DST: 'BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_',
+    }
+  )
+  
+  const cHashMyMessage2 = hashMyMessage2.toHex(true)
+
+  console.log("hashMyMessage x")
+  console.log(hashMyMessage2.x)
+  console.log("hashMyMessage y")
+  console.log(hashMyMessage2.y)
+
+  console.log("10101010101010101010101010101010101010101010")
+  console.log("cHashMyMessage", cHashMyMessage2)
   
 
   const Hm = await normP2Hash(message);
@@ -961,6 +1060,12 @@ export async function verify(signature: G2Hex, message: G2Hex, publicKey: G1Hex)
 
   const exp = eGS.multiply(ePHm).finalExponentiate();
   console.log("...verify")
+  // mapToCurve(
+  //   [
+  //     BigInt("0x14406e5bfb9209256a3820879a29ac2f62d6aca82324bf3ae2aa7d3c54792043bd8c791fccdb080c1a52dc68b8b69350"),
+  //     BigInt("0x0e885bb33996e12f07da69073e2c0cc880bc8eff26d2a724299eb12d54f4bcf26f4748bb020e80a7e3794a7b0e47a641")
+  //   ]
+  // )
   return exp.equals(Fp12.ONE);
 }
 
